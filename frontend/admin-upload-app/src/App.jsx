@@ -35,7 +35,18 @@ function App() {
 
       if (response.ok) {
         setMessage(data.message || "Upload successful!");
-        setProducts(data.products || []); // products = [{ product_name, image_url }]
+        
+        // After successful upload, fetch featured products (this will trigger Firecrawl calls)
+        setMessage('Upload successful! Now fetching featured product images...');
+        const featuredResponse = await fetch("http://127.0.0.1:8000/featured-products");
+        const featuredData = await featuredResponse.json();
+        
+        if (featuredResponse.ok) {
+          setProducts(featuredData.products || []);
+          setMessage(`Upload successful! Fetched ${featuredData.products?.length || 0} featured products with images.`);
+        } else {
+          setMessage('Upload successful, but failed to fetch featured products.');
+        }
       } else {
         setMessage(data.error || 'Upload failed.');
       }
@@ -90,6 +101,7 @@ function App() {
                   className="product-image"
                 />
                 <p className="product-name">{p.product_name}</p>
+                {p.description && <p className="product-description">{p.description}</p>}
               </div>
             ))}
           </div>

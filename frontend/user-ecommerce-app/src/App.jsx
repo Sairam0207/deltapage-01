@@ -1,46 +1,64 @@
 import React, { useState, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import './App.css';
-
-// Import assets from your assets folder.
-import deltaPageLogo from './assets/deltapage-logo.png'; 
-import mainBannerImage from './assets/main-banner.png'; 
+import deltaPageLogo from './assets/deltapage-logo.png';
+import mainBannerImage from './assets/main-banner.png';
 
 function App() {
   const [chatMessages, setChatMessages] = useState([]);
   const [inputMessage, setInputMessage] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [isChatOpen, setIsChatOpen] = useState(false);
-  const [products, setProducts] = useState([]); // NEW state for products
+  const [products, setProducts] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [imageLoadingStates, setImageLoadingStates] = useState({});
+  const [imageErrorStates, setImageErrorStates] = useState({});
 
-  // Fetch products dynamically from backend
   useEffect(() => {
-    const fetchProducts = async () => {
-      try {
-        const res = await fetch("http://localhost:8000/products");
-        const data = await res.json();
-        setProducts(data.products || []);
-      } catch (err) {
-        console.error("Error fetching products:", err);
-      }
+    let isMounted = true;
+    
+      const fetchFeaturedProducts = async () => {
+        try {
+          console.log("Fetching featured products from Supabase (readonly mode)...");
+          const res = await fetch("http://localhost:8000/featured-products-readonly");
+          const data = await res.json();
+          console.log("Received products:", data.products);
+          console.log("From Supabase:", data.from_supabase ? "Yes" : "No");
+          console.log("Firecrawl calls made:", data.firecrawl_calls || 0);
+          console.log("Mode:", data.mode || "unknown");
+
+          // Only update state if component is still mounted
+          if (isMounted) {
+            setProducts(data.products || []);
+          }
+        } catch (err) {
+          console.error("Error fetching featured products:", err);
+        } finally {
+          if (isMounted) {
+            setIsLoading(false);
+          }
+        }
+      };
+    
+    fetchFeaturedProducts();
+    
+    // Cleanup function to prevent state updates on unmounted component
+    return () => {
+      isMounted = false;
     };
-    fetchProducts();
   }, []);
 
   const handleSendMessage = async () => {
     if (inputMessage.trim() === '') return;
-
     const userMessage = inputMessage.trim();
     const newMessages = [...chatMessages, { sender: 'user', text: userMessage }];
     setChatMessages(newMessages);
     setInputMessage('');
     setIsTyping(true);
-
     try {
       const chatUrl = `http://localhost:8000/chat?query=${encodeURIComponent(userMessage)}`;
       const response = await fetch(chatUrl);
       const data = await response.json();
-
       setChatMessages((prevMessages) => [
         ...prevMessages,
         { sender: 'bot', text: data.answer },
@@ -66,6 +84,31 @@ function App() {
     setIsChatOpen(!isChatOpen);
   };
 
+  const handleImageLoad = (productIndex) => {
+    setImageLoadingStates(prev => ({
+      ...prev,
+      [productIndex]: false
+    }));
+  };
+
+  const handleImageError = (productIndex) => {
+    setImageLoadingStates(prev => ({
+      ...prev,
+      [productIndex]: false
+    }));
+    setImageErrorStates(prev => ({
+      ...prev,
+      [productIndex]: true
+    }));
+  };
+
+  const handleImageLoadStart = (productIndex) => {
+    setImageLoadingStates(prev => ({
+      ...prev,
+      [productIndex]: true
+    }));
+  };
+
   return (
     <div className="landing-page-container">
       <div className="main-content">
@@ -86,7 +129,6 @@ function App() {
             <a href="#cart" className="header-icon"><i className="fas fa-shopping-cart"></i> My Cart</a>
           </div>
         </header>
-
         <section className="hero-section">
           <div className="hero-content">
             <div className="hero-brand">
@@ -98,29 +140,54 @@ function App() {
             <button className="shop-now-button">SHOP NOW</button>
           </div>
         </section>
-
         <section className="banner-section">
           <img src={mainBannerImage} alt="Time to Upgrade Banner" className="main-banner-image" />
         </section>
-
-        {/* DYNAMIC PRODUCTS SECTION */}
         <section className="products-section">
-          <h2>Our Top Products</h2>
+          <h2>Featured Products</h2>
           <div className="product-list">
-            {products.length > 0 ? (
-              products.map((p) => (
-                <div key={p.id} className="product-item">
-                  <img src={p.image_url} alt={p.name} />
-                  <h3>{p.name}</h3>
-                  {p.price !== undefined && <p>₹{p.price}</p>}
+            {isLoading ? (
+              <div className="loading-container">
+                <div className="loading-spinner"></div>
+        <p>Loading featured products...</p>
+        <small>Fetching from Supabase (no Firecrawl calls)</small>
+              </div>
+            ) : products.length > 0 ? (
+              products.map((p, i) => (
+                <div key={i} className="product-item">
+                  <div className="product-image-container">
+                    {imageLoadingStates[i] && (
+                      <div className="image-loading">
+                        <div className="loading-spinner"></div>
+                        <span>Loading...</span>
+                      </div>
+                    )}
+                    {imageErrorStates[i] ? (
+                      <div className="image-placeholder">
+                        <i className="fas fa-image"></i>
+                        <span>Image not available</span>
+                      </div>
+                    ) : (
+                      <img 
+                        src={p.image_url} 
+                        alt={p.product_name || p.name || 'Product'}
+                        onLoadStart={() => handleImageLoadStart(i)}
+                        onLoad={() => handleImageLoad(i)}
+                        onError={() => handleImageError(i)}
+                        style={{ display: imageLoadingStates[i] ? 'none' : 'block' }}
+                      />
+                    )}
+                  </div>
+                  <h3>{p.product_name || p.name || 'Product'}</h3>
+                  {p.description && <p className="product-description">{p.description}</p>}
+                  {p.price && <p className="product-price">₹{p.price}</p>}
                 </div>
               ))
             ) : (
-              <p>Loading products...</p>
+              <p>No products found.</p>
             )}
           </div>
         </section>
-
         <footer className="main-footer">
           <div className="footer-column">
             <h3>Home</h3>
@@ -133,7 +200,6 @@ function App() {
           <div className="footer-column">
             <h3>What We Do</h3>
             <p>We sell IT Hardware, PC Building Solutions, Servers, & Network Racks. Also we do PC Spares, Upgrades & Service for your PCs & Laptops.</p>
-            <p>We are a team of gaming building, PC’s Servers, & Laptops... on for your choice.</p>
           </div>
           <div className="footer-column">
             <h3>Connect with us</h3>
@@ -151,14 +217,11 @@ function App() {
           </div>
         </footer>
       </div>
-      
-      {/* Chatbot */}
       {!isChatOpen && (
         <button className="open-query-button" onClick={toggleChat}>
           Open Query Chatbot
         </button>
       )}
-
       {isChatOpen && (
         <div className="chat-sidebar">
           <div className="chat-header">
@@ -170,11 +233,7 @@ function App() {
             {chatMessages.map((msg, index) => (
               <div key={index} className={`message ${msg.sender}`}>
                 <div className="message-bubble">
-                  {msg.sender === 'user' ? (
-                    msg.text
-                  ) : (
-                    <ReactMarkdown>{msg.text}</ReactMarkdown>
-                  )}
+                  {msg.sender === 'user' ? msg.text : <ReactMarkdown>{msg.text}</ReactMarkdown>}
                 </div>
               </div>
             ))}
