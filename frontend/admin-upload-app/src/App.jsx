@@ -34,18 +34,21 @@ function App() {
       const data = await response.json();
 
       if (response.ok) {
-        setMessage(data.message || "Upload successful!");
-        
-        // After successful upload, fetch featured products (this will trigger Firecrawl calls)
-        setMessage('Upload successful! Now fetching featured product images...');
-        const featuredResponse = await fetch("http://127.0.0.1:8000/featured-products");
-        const featuredData = await featuredResponse.json();
-        
-        if (featuredResponse.ok) {
-          setProducts(featuredData.products || []);
-          setMessage(`Upload successful! Fetched ${featuredData.products?.length || 0} featured products with images.`);
+        // Prefer the exact products extracted from the uploaded file
+        const uploadedProducts = Array.isArray(data.products) ? data.products : [];
+        if (uploadedProducts.length > 0) {
+          setProducts(uploadedProducts);
+          setMessage(`Upload successful! Found ${uploadedProducts.length} products with images.`);
         } else {
-          setMessage('Upload successful, but failed to fetch featured products.');
+          // Fallback: fetch what the backend cached for the last upload
+          try {
+            const r = await fetch("http://127.0.0.1:8000/uploaded-products");
+            const j = await r.json();
+            setProducts(j.products || []);
+            setMessage(`Upload successful! Found ${j.products?.length || 0} products with images.`);
+          } catch (e) {
+            setMessage('Upload succeeded, but no products were returned.');
+          }
         }
       } else {
         setMessage(data.error || 'Upload failed.');

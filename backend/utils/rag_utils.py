@@ -18,6 +18,55 @@ genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 embedder = SentenceTransformer("all-MiniLM-L6-v2")
 FIRECRAWL_API_KEY = os.getenv("FIRECRAWL_API_KEY")
 
+def normalize_product_name(product_name: str) -> str:
+    """Use Gemini to normalize/expand short product names into a precise query.
+
+    The output is a single short line suitable for search, typically:
+    "Brand Model Category" (e.g., "NZXT H510 Flow PC case").
+    Falls back to the input on any error or empty response.
+    """
+    name = (product_name or "").strip()
+    if not name:
+        return product_name
+    try:
+        model = genai.GenerativeModel('gemini-2.5-flash')
+        prompt = (
+            "You are normalizing a product name for image search. Given a short or generic name, "
+            "return a precise, concise search string with brand and model if obvious. "
+            "Avoid extra words, keep it under 8 words. Examples:\n"
+            "keyboard -> mechanical keyboard product photo\n"
+            "H510 Flow -> NZXT H510 Flow PC case product photo\n"
+            "Trident Z 32GB -> G.Skill Trident Z 32GB DDR5 RAM product photo\n"
+            f"Input: {name}\nOutput:"
+        )
+        response = model.generate_content(prompt)
+        normalized = (response.text or "").strip()
+        # Guardrails: keep it short and on one line
+        normalized = normalized.splitlines()[0][:120]
+        return normalized or name
+    except Exception as e:
+        logger.warning(f"Gemini normalize_product_name failed for '{name}': {e}")
+        return name
+
+def _looks_like_image_url(url: str) -> bool:
+    if not url:
+        return False
+    lower = url.lower()
+    if any(bad in lower for bad in ["sprite", "placeholder", "logo", "icon", "thumbnail"]):
+        return False
+    if any(lower.endswith(ext) for ext in [".jpg", ".jpeg", ".png", ".webp"]):
+        return True
+    return False
+
+def _is_real_image(url: str) -> bool:
+    try:
+        # Cheap HEAD check to ensure image content
+        r = requests.head(url, timeout=8, allow_redirects=True)
+        ctype = r.headers.get("Content-Type", "").lower()
+        return r.status_code < 400 and ctype.startswith("image/")
+    except Exception:
+        return False
+
 def generate_product_description(product_name: str) -> str:
     """Generate a product description using Gemini 2.5 Flash API"""
     try:
@@ -53,18 +102,30 @@ def fetch_product_image(product_name: str) -> str:
     max_retries = 3
     retry_delay = 10  # seconds
     
+    normalized = normalize_product_name(product_name)
+    query_candidates = [
+        f"{normalized} product photo", 
+        f"{normalized} official product image", 
+        f"{normalized} box photo",
+        product_name,
+    ]
+    preferred_domains = [
+        "nzxt.com", "gskill.com", "intel.com", "nvidia.com", "samsung.com",
+        "asus.com", "corsair.com", "coolermaster.com", "msi.com"
+    ]
+
     for attempt in range(max_retries):
         try:
             url = "https://api.firecrawl.dev/v2/search"
             payload = {
-                "query": f"direct image file url for product: {product_name}",
+                "query": f"Find direct image file URLs for: {query_candidates[attempt % len(query_candidates)]}",
                 "sources": ["images"],
                 "categories": [],
-                "limit": 1,
+                "limit": 8,
                 "scrapeOptions": {
                     "onlyMainContent": True,
                     "maxAge": 172800000,
-                    "parsers": ["pdf"],
+                    "parsers": [],
                     "formats": []
                 }
             }
@@ -91,19 +152,28 @@ def fetch_product_image(product_name: str) -> str:
             
             logger.info(f"Firecrawl response data: {data}")
 
-            # Try to extract the first image URL from the response
+            # Extract viable image URLs and score by domain preference
             images = data.get("data", {}).get("images", [])
-            if images:
-                # Extract the actual image URL, not the product page URL
-                image_url = images[0].get("imageUrl")
-                if image_url:
-                    logger.info(f"Found image URL: {image_url}")
-                    return image_url
-                # Fallback to url if imageUrl is not available
-                fallback_url = images[0].get("url")
-                if fallback_url:
-                    logger.info(f"Using fallback URL: {fallback_url}")
-                    return fallback_url
+            candidates = []
+            for item in images:
+                candidate = item.get("imageUrl") or item.get("url")
+                if not candidate:
+                    continue
+                if not _looks_like_image_url(candidate):
+                    continue
+                score = 0
+                for d in preferred_domains:
+                    if d in candidate:
+                        score += 5
+                candidates.append((score, candidate))
+            candidates.sort(reverse=True)
+            selected = []
+            for _, candidate_url in candidates:
+                if _is_real_image(candidate_url):
+                    selected.append(candidate_url)
+                    if len(selected) >= 1:
+                        logger.info(f"Selected product image: {selected[0]}")
+                        return selected[0]
             
             # If no images found, break and use fallback
             break
@@ -148,27 +218,50 @@ def process_document(content, filetype="pdf"):
     product_lines = re.findall(r"(?:Product|Item|Name)[:\-]?\s*(.+)", full_text, re.IGNORECASE)
     if not product_lines:
         product_lines = re.findall(r"\b[A-Z][a-zA-Z0-9]+\b", full_text)
+    # Avoid heavy image lookups here to reduce external API calls.
+    # We only persist product names; the /upload endpoint will fetch images for up to 6 items.
     for product in set(product_lines):
         try:
-            image_url = fetch_product_image(product.strip())
-            save_product(name=product.strip(), image_url=image_url)
+            save_product(name=product.strip(), image_url=None)
         except Exception as e:
             logger.error(f"Product save error: {e}")
     return "✅ Document processed, products saved, and embeddings stored in Supabase."
 
-def query_rag(query: str):
+def query_rag(query: str, history: list | None = None):
+    """Answer a user query using RAG with optional chat history.
+
+    history: list of {"role": "user"|"assistant", "content": str}
+    """
     try:
         query_vec = embedder.encode([query])[0].tolist()
         similar_docs = fetch_similar(query_vec, k=3) or []
         if not similar_docs:
             return "⚠️ No relevant documents found in Supabase."
-        context = "\n".join([doc["content"] for doc in similar_docs if doc.get("content")])
-        prompt = f"""You are a helpful assistant.
-Use the context below to answer the question.
-Context:
-{context}
-Question: {query}
-Answer in detail using only the context above:"""
+        context = "\n".join([doc.get("content", "") for doc in similar_docs if doc.get("content")])
+
+        history_text = ""
+        if history:
+            # Keep last 10 turns
+            trimmed = history[-10:]
+            lines = []
+            for m in trimmed:
+                role = m.get("role", "user")
+                content = m.get("content", "").strip()
+                if not content:
+                    continue
+                prefix = "User" if role == "user" else "Assistant"
+                lines.append(f"{prefix}: {content}")
+            history_text = "\n".join(lines)
+
+        prompt = (
+            "You are a helpful assistant. Use ONLY the provided context to answer.\n"
+            "If the answer is not in the context, say you don't know.\n\n"
+            f"Context:\n{context}\n\n"
+            f"Chat history (most recent last):\n{history_text}\n\n"
+            f"User: {query}\n"
+            "Assistant:"
+        )
+
         model = genai.GenerativeModel("gemini-2.5-flash")
         response = model.generate_content(prompt)
         return response.text if response else "⚠️ Gemini returned no response."

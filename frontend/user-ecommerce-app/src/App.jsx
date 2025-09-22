@@ -2,7 +2,9 @@ import React, { useState, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import './App.css';
 import deltaPageLogo from './assets/deltapage-logo.png';
-import mainBannerImage from './assets/main-banner.png';
+// Use user-requested hardware image; fallback to a safe stock photo if it fails.
+const HERO_IMAGE_PRIMARY = 'https://weirdwonderfulai.art/wp-content/uploads/2023/03/ai-desktop-pc-parts--980x653.jpg';
+const HERO_IMAGE_FALLBACK = 'https://images.unsplash.com/photo-1518779578993-ec3579fee39f?q=80&w=1400&auto=format&fit=crop&ixlib=rb-4.0.3';
 
 function App() {
   const [chatMessages, setChatMessages] = useState([]);
@@ -16,36 +18,40 @@ function App() {
 
   useEffect(() => {
     let isMounted = true;
-    
-      const fetchFeaturedProducts = async () => {
-        try {
-          console.log("Fetching featured products from Supabase (readonly mode)...");
-          const res = await fetch("http://localhost:8000/featured-products-readonly");
-          const data = await res.json();
-          console.log("Received products:", data.products);
-          console.log("From Supabase:", data.from_supabase ? "Yes" : "No");
-          console.log("Firecrawl calls made:", data.firecrawl_calls || 0);
-          console.log("Mode:", data.mode || "unknown");
 
-          // Only update state if component is still mounted
-          if (isMounted) {
-            setProducts(data.products || []);
-          }
-        } catch (err) {
-          console.error("Error fetching featured products:", err);
-        } finally {
-          if (isMounted) {
-            setIsLoading(false);
-          }
+    const fetchUploadedOrFeatured = async () => {
+      try {
+        // 1) Try to show the latest uploaded products first
+        console.log("Fetching uploaded products...");
+        const uploadedRes = await fetch("http://localhost:8000/uploaded-products");
+        const uploadedData = await uploadedRes.json();
+        const uploaded = uploadedData?.products || [];
+        if (isMounted && Array.isArray(uploaded) && uploaded.length > 0) {
+          setProducts(uploaded);
+          setIsLoading(false);
+          return; // done
         }
-      };
-    
-    fetchFeaturedProducts();
-    
-    // Cleanup function to prevent state updates on unmounted component
-    return () => {
-      isMounted = false;
+      } catch (e) {
+        console.warn("Uploaded products not available, falling back to featured.", e);
+      }
+
+      // 2) Fallback to readonly featured tiles
+      try {
+        console.log("Fetching featured products from Supabase (readonly mode)...");
+        const res = await fetch("http://localhost:8000/featured-products-readonly");
+        const data = await res.json();
+        if (isMounted) {
+          setProducts(data.products || []);
+        }
+      } catch (err) {
+        console.error("Error fetching featured products:", err);
+      } finally {
+        if (isMounted) setIsLoading(false);
+      }
     };
+
+    fetchUploadedOrFeatured();
+    return () => { isMounted = false; };
   }, []);
 
   const handleSendMessage = async () => {
@@ -56,8 +62,17 @@ function App() {
     setInputMessage('');
     setIsTyping(true);
     try {
-      const chatUrl = `http://localhost:8000/chat?query=${encodeURIComponent(userMessage)}`;
-      const response = await fetch(chatUrl);
+      // Persist session id so history survives reloads
+      let sessionId = localStorage.getItem('chatSession');
+      if (!sessionId) {
+        sessionId = (self.crypto?.randomUUID?.() || Math.random().toString(36).slice(2));
+        localStorage.setItem('chatSession', sessionId);
+      }
+      const response = await fetch('http://localhost:8000/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId, query: userMessage })
+      });
       const data = await response.json();
       setChatMessages((prevMessages) => [
         ...prevMessages,
@@ -130,18 +145,68 @@ function App() {
           </div>
         </header>
         <section className="hero-section">
-          <div className="hero-content">
-            <div className="hero-brand">
-              <img src={deltaPageLogo} alt="Deltapage Logo" className="hero-logo" />
-              <p>India's First Online IT Store... Since 1998!</p>
+          <div className="hero-grid">
+            <div className="hero-copy">
+              <span className="pill-badge">Deltapage.com • Since 1998</span>
+              <h1>Build. Upgrade. Accelerate.</h1>
+              <p>Curated IT hardware, trusted brands, and smart assistance for your next setup.</p>
+              <div className="hero-cta">
+                <button className="btn-primary">Shop Now</button>
+                <button className="btn-ghost">View Deals</button>
+              </div>
             </div>
-            <h2>Best Offers!</h2>
-            <p>100% Genuine Products</p>
-            <button className="shop-now-button">SHOP NOW</button>
+            <div className="hero-device">
+              <img
+                src={HERO_IMAGE_PRIMARY}
+                alt="Featured hardware"
+                className="main-banner-image"
+                onError={(e) => { e.currentTarget.onerror = null; e.currentTarget.src = HERO_IMAGE_FALLBACK; }}
+              />
+            </div>
+          </div>
+        </section>
+        {/* Collections section */}
+        <section className="collections-section" id="collections">
+          <div className="collections-header">
+            <h2>Explore Collections</h2>
+            <p>Shop curated picks across GPUs, CPUs, Storage, and Peripherals.</p>
+          </div>
+          <div className="collections-grid">
+            {[
+              {
+                title: 'Graphics Cards',
+                img: 'https://images.unsplash.com/photo-1605648916360-8e4c4d970d9b?q=80&w=1200&auto=format&fit=crop',
+              },
+              {
+                title: 'Processors',
+                img: 'https://images.unsplash.com/photo-1593642532973-d31b6557fa68?q=80&w=1200&auto=format&fit=crop',
+              },
+              {
+                title: 'Storage & SSDs',
+                img: 'https://images.unsplash.com/photo-1541807084-5c52b6b3adef?q=80&w=1200&auto=format&fit=crop',
+              },
+              {
+                title: 'Peripherals',
+                img: 'https://images.unsplash.com/photo-1517336714731-489689fd1ca8?q=80&w=1200&auto=format&fit=crop',
+              },
+            ].map((c, i) => (
+              <div key={i} className="collection-card">
+                <img src={c.img} alt={c.title} />
+                <div className="collection-overlay">
+                  <h3>{c.title}</h3>
+                  <button className="btn-primary small">Shop</button>
+                </div>
+              </div>
+            ))}
           </div>
         </section>
         <section className="banner-section">
-          <img src={mainBannerImage} alt="Time to Upgrade Banner" className="main-banner-image" />
+          <img
+            src={HERO_IMAGE_PRIMARY}
+            alt="Featured banner"
+            className="main-banner-image"
+            onError={(e) => { e.currentTarget.onerror = null; e.currentTarget.src = HERO_IMAGE_FALLBACK; }}
+          />
         </section>
         <section className="products-section">
           <h2>Featured Products</h2>
