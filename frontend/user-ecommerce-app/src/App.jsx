@@ -2,7 +2,13 @@ import React, { useState, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import './App.css';
 import deltaPageLogo from './assets/deltapage-logo.png';
+
+// Use user-requested hardware image; fallback to a safe stock photo if it fails.
+const HERO_IMAGE_PRIMARY = 'https://weirdwonderfulai.art/wp-content/uploads/2023/03/ai-desktop-pc-parts--980x653.jpg';
+const HERO_IMAGE_FALLBACK = 'https://images.unsplash.com/photo-1518779578993-ec3579fee39f?q=80&w=1400&auto=format&fit=crop&ixlib=rb-4.0.3';
+
 import mainBannerImage from './assets/main-banner.png';
+
 
 function App() {
   const [chatMessages, setChatMessages] = useState([]);
@@ -12,19 +18,80 @@ function App() {
   const [products, setProducts] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
 
+  const [imageLoadingStates, setImageLoadingStates] = useState({});
+  const [imageErrorStates, setImageErrorStates] = useState({});
+
+
   useEffect(() => {
-    const fetchProducts = async () => {
+    let isMounted = true;
+
+    const normalizeProductKey = (raw = '') => {
+      let s = String(raw || '').toLowerCase().trim();
+      // Drop leading punctuation (e.g., "-Seagate ...")
+      s = s.replace(/^[^a-z0-9]+/, '');
+      // Remove trailing generic category words
+      s = s.replace(/\b(hdd|ssd)\b$/i, '').trim();
+      // Collapse punctuation to spaces and normalize whitespace
+      s = s.replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim();
+      return s;
+    };
+
+    const uniqueByNamePreferRealImage = (items = []) => {
+      const map = new Map();
+      for (const p of items) {
+        const key = normalizeProductKey(p.product_name || p.name || '');
+        if (!key) continue;
+        const existing = map.get(key);
+        const hasRealImage = p.image_url && !String(p.image_url).includes('placehold.co');
+        const existingHasRealImage = existing && existing.image_url && !String(existing.image_url).includes('placehold.co');
+        if (!existing) {
+          map.set(key, p);
+        } else if (hasRealImage && !existingHasRealImage) {
+          map.set(key, p);
+        }
+      }
+      return Array.from(map.values());
+    };
+
+    const fetchUploadedOrFeatured = async () => {
       try {
-        const res = await fetch("http://localhost:8000/products");
+        // 1) Try to show the latest uploaded products first
+        console.log("Fetching uploaded products...");
+        const uploadedRes = await fetch("http://localhost:8000/uploaded-products");
+        const uploadedData = await uploadedRes.json();
+        const uploaded = uniqueByNamePreferRealImage(uploadedData?.products || []);
+        if (isMounted && Array.isArray(uploaded) && uploaded.length > 0) {
+          setProducts(uploaded);
+          setIsLoading(false);
+          return; // done
+        }
+      } catch (e) {
+        console.warn("Uploaded products not available, falling back to featured.", e);
+      }
+
+      // 2) Fallback to readonly featured tiles
+      try {
+        console.log("Fetching featured products from Supabase (readonly mode)...");
+        const res = await fetch("http://localhost:8000/featured-products-readonly");
         const data = await res.json();
-        setProducts(data.products || []);
+        if (isMounted) {
+          setProducts(uniqueByNamePreferRealImage(data.products || []));
+        }
       } catch (err) {
+
+        console.error("Error fetching featured products:", err);
+      } finally {
+        if (isMounted) setIsLoading(false);
+
         console.error("Error fetching products:", err);
       } finally {
         setIsLoading(false);
+
       }
     };
-    fetchProducts();
+
+    fetchUploadedOrFeatured();
+    return () => { isMounted = false; };
   }, []);
 
   const handleSendMessage = async () => {
@@ -35,8 +102,17 @@ function App() {
     setInputMessage('');
     setIsTyping(true);
     try {
-      const chatUrl = `http://localhost:8000/chat?query=${encodeURIComponent(userMessage)}`;
-      const response = await fetch(chatUrl);
+      // Persist session id so history survives reloads
+      let sessionId = localStorage.getItem('chatSession');
+      if (!sessionId) {
+        sessionId = (self.crypto?.randomUUID?.() || Math.random().toString(36).slice(2));
+        localStorage.setItem('chatSession', sessionId);
+      }
+      const response = await fetch('http://localhost:8000/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId, query: userMessage })
+      });
       const data = await response.json();
       setChatMessages((prevMessages) => [
         ...prevMessages,
@@ -63,6 +139,31 @@ function App() {
     setIsChatOpen(!isChatOpen);
   };
 
+  const handleImageLoad = (productIndex) => {
+    setImageLoadingStates(prev => ({
+      ...prev,
+      [productIndex]: false
+    }));
+  };
+
+  const handleImageError = (productIndex) => {
+    setImageLoadingStates(prev => ({
+      ...prev,
+      [productIndex]: false
+    }));
+    setImageErrorStates(prev => ({
+      ...prev,
+      [productIndex]: true
+    }));
+  };
+
+  const handleImageLoadStart = (productIndex) => {
+    setImageLoadingStates(prev => ({
+      ...prev,
+      [productIndex]: true
+    }));
+  };
+
   return (
     <div className="landing-page-container">
       <div className="main-content">
@@ -84,29 +185,119 @@ function App() {
           </div>
         </header>
         <section className="hero-section">
-          <div className="hero-content">
-            <div className="hero-brand">
-              <img src={deltaPageLogo} alt="Deltapage Logo" className="hero-logo" />
-              <p>India's First Online IT Store... Since 1998!</p>
+          <div className="hero-grid">
+            <div className="hero-copy">
+              <span className="pill-badge">Deltapage.com • Since 1998</span>
+              <h1>Build. Upgrade. Accelerate.</h1>
+              <p>Curated IT hardware, trusted brands, and smart assistance for your next setup.</p>
+              <div className="hero-cta">
+                <button className="btn-primary">Shop Now</button>
+                <button className="btn-ghost">View Deals</button>
+              </div>
             </div>
-            <h2>Best Offers!</h2>
-            <p>100% Genuine Products</p>
-            <button className="shop-now-button">SHOP NOW</button>
+            <div className="hero-device">
+              <img
+                src={HERO_IMAGE_PRIMARY}
+                alt="Featured hardware"
+                className="main-banner-image"
+                onError={(e) => { e.currentTarget.onerror = null; e.currentTarget.src = HERO_IMAGE_FALLBACK; }}
+              />
+            </div>
           </div>
         </section>
+
+        {/* Collections section */}
+        <section className="collections-section" id="collections">
+          <div className="collections-header">
+            <h2>Explore Collections</h2>
+            <p>Shop curated picks across GPUs, CPUs, Storage, and Peripherals.</p>
+          </div>
+          <div className="collections-grid">
+            {[
+              {
+                title: 'Graphics Cards',
+                img: 'https://m.media-amazon.com/images/I/711GaKg9oQL.jpg',
+              },
+              {
+                title: 'Processors',
+                img: 'https://www.servermania.com/kb/images/f_webp,q_auto:best/v1713465219/kb/Featured-1_3453111183/Featured-1_3453111183.png?_i=AA',
+              },
+              {
+                title: 'Storage & SSDs',
+                img: 'https://cdn.mos.cms.futurecdn.net/qToUNqFDhrMuoX7wHdPtgb-970-80.jpg.webp',
+              },
+              {
+                title: 'Peripherals',
+                img: 'https://echipset.com/wp-content/uploads/2023/06/Cover-2023-06-19T140916.570.jpg',
+              },
+            ].map((c, i) => (
+              <div key={i} className="collection-card">
+                <img src={c.img} alt={c.title} />
+                <div className="collection-overlay">
+                  <h3>{c.title}</h3>
+                  <button className="btn-primary small">Shop</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+
+
         <section className="banner-section">
-          <img src={mainBannerImage} alt="Time to Upgrade Banner" className="main-banner-image" />
+          <img
+            src={HERO_IMAGE_PRIMARY}
+            alt="Featured banner"
+            className="main-banner-image"
+            onError={(e) => { e.currentTarget.onerror = null; e.currentTarget.src = HERO_IMAGE_FALLBACK; }}
+          />
         </section>
         <section className="products-section">
-          <h2>Our Top Products</h2>
+          <h2>Featured Products</h2>
           <div className="product-list">
             {isLoading ? (
+
+              <div className="loading-container">
+                <div className="loading-spinner"></div>
+        <p>Loading featured products...</p>
+        <small>Fetching from Supabase (no Firecrawl calls)</small>
+              </div>
+            ) : products.length > 0 ? (
+              products.map((p, i) => (
+                <div key={i} className="product-item">
+                  <div className="product-image-container">
+                    {imageLoadingStates[i] && (
+                      <div className="image-loading">
+                        <div className="loading-spinner"></div>
+                        <span>Loading...</span>
+                      </div>
+                    )}
+                    {imageErrorStates[i] ? (
+                      <div className="image-placeholder">
+                        <i className="fas fa-image"></i>
+                        <span>Image not available</span>
+                      </div>
+                    ) : (
+                      <img 
+                        src={p.image_url} 
+                        alt={p.product_name || p.name || 'Product'}
+                        onLoadStart={() => handleImageLoadStart(i)}
+                        onLoad={() => handleImageLoad(i)}
+                        onError={() => handleImageError(i)}
+                        style={{ display: imageLoadingStates[i] ? 'none' : 'block' }}
+                      />
+                    )}
+                  </div>
+                  <h3>{p.product_name || p.name || 'Product'}</h3>
+                  {p.description && <p className="product-description">{p.description}</p>}
+                  {p.price && <p className="product-price">₹{p.price}</p>}
+
               <p>Loading products...</p>
             ) : products.length > 0 ? (
               products.map((p, i) => (
                 <div key={i} className="product-item">
                   <img src={p.image_url} alt={p.product_name} />
                   <h3>{p.product_name}</h3>
+
                 </div>
               ))
             ) : (

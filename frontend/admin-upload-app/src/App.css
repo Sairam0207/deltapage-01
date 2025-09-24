@@ -140,5 +140,13 @@ input[type="file"] {
   font-size: 0.95rem;
   font-weight: 600;
   color: var(--text-color);
+  margin: 0 0 0.5rem 0;
+}
+
+.product-description {
+  font-size: 0.8rem;
+  color: var(--message-color);
   margin: 0;
+  line-height: 1.4;
+  text-align: left;
 }

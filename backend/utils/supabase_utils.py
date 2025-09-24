@@ -43,3 +43,49 @@ def fetch_products():
     except Exception as e:
         logger.error(f"Supabase fetch products error: {e}")
         return []
+
+def save_featured_product(name: str, image_url: str, description: str = None):
+    """Save a featured product with its image URL and description to Supabase"""
+    try:
+        data_to_insert = {
+            "name": name, 
+            "image_url": image_url,
+            "description": description or f"Featured product: {name}"
+        }
+        supabase.table("products").insert(data_to_insert).execute()
+        logger.info(f"Saved featured product to Supabase: {name}")
+    except Exception as e:
+        logger.error(f"Supabase save featured product error: {e}")
+
+def fetch_featured_products():
+    """Fetch featured products from Supabase (all products with image_url)"""
+    try:
+        response = supabase.table("products").select("*").not_.is_("image_url", "null").order("created_at", desc=True).execute()
+        return response.data
+    except Exception as e:
+        logger.error(f"Supabase fetch featured products error: {e}")
+        return []
+
+def check_featured_product_exists(name: str):
+    """Check if a featured product already exists in Supabase"""
+    try:
+        response = supabase.table("products").select("id, image_url, description").eq("name", name).not_.is_("image_url", "null").execute()
+        return response.data[0] if response.data else None
+    except Exception as e:
+        logger.error(f"Supabase check featured product error: {e}")
+        return None
+
+def save_product(name: str, description: str = None, price: float = None, image_url: str = None):
+    try:
+        data_to_insert = {"name": name, "description": description, "price": price, "image_url": image_url}
+        supabase.table("products").insert(data_to_insert).execute()
+    except Exception as e:
+        logger.error(f"Supabase save product error: {e}")
+
+def fetch_products():
+    try:
+        response = supabase.table("products").select("*").order("created_at", desc=True).execute()
+        return response.data
+    except Exception as e:
+        logger.error(f"Supabase fetch products error: {e}")
+        return []
