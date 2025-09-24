@@ -2,9 +2,13 @@ import React, { useState, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import './App.css';
 import deltaPageLogo from './assets/deltapage-logo.png';
+
 // Use user-requested hardware image; fallback to a safe stock photo if it fails.
 const HERO_IMAGE_PRIMARY = 'https://weirdwonderfulai.art/wp-content/uploads/2023/03/ai-desktop-pc-parts--980x653.jpg';
 const HERO_IMAGE_FALLBACK = 'https://images.unsplash.com/photo-1518779578993-ec3579fee39f?q=80&w=1400&auto=format&fit=crop&ixlib=rb-4.0.3';
+
+import mainBannerImage from './assets/main-banner.png';
+
 
 function App() {
   const [chatMessages, setChatMessages] = useState([]);
@@ -13,8 +17,10 @@ function App() {
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [products, setProducts] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
+
   const [imageLoadingStates, setImageLoadingStates] = useState({});
   const [imageErrorStates, setImageErrorStates] = useState({});
+
 
   useEffect(() => {
     let isMounted = true;
@@ -72,9 +78,15 @@ function App() {
           setProducts(uniqueByNamePreferRealImage(data.products || []));
         }
       } catch (err) {
+
         console.error("Error fetching featured products:", err);
       } finally {
         if (isMounted) setIsLoading(false);
+
+        console.error("Error fetching products:", err);
+      } finally {
+        setIsLoading(false);
+
       }
     };
 
@@ -193,6 +205,7 @@ function App() {
             </div>
           </div>
         </section>
+
         {/* Collections section */}
         <section className="collections-section" id="collections">
           <div className="collections-header">
@@ -228,6 +241,8 @@ function App() {
             ))}
           </div>
         </section>
+
+
         <section className="banner-section">
           <img
             src={HERO_IMAGE_PRIMARY}
@@ -240,6 +255,7 @@ function App() {
           <h2>Featured Products</h2>
           <div className="product-list">
             {isLoading ? (
+
               <div className="loading-container">
                 <div className="loading-spinner"></div>
         <p>Loading featured products...</p>
@@ -274,6 +290,14 @@ function App() {
                   <h3>{p.product_name || p.name || 'Product'}</h3>
                   {p.description && <p className="product-description">{p.description}</p>}
                   {p.price && <p className="product-price">₹{p.price}</p>}
+
+              <p>Loading products...</p>
+            ) : products.length > 0 ? (
+              products.map((p, i) => (
+                <div key={i} className="product-item">
+                  <img src={p.image_url} alt={p.product_name} />
+                  <h3>{p.product_name}</h3>
+
                 </div>
               ))
             ) : (

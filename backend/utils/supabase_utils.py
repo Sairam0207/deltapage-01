@@ -74,3 +74,18 @@ def check_featured_product_exists(name: str):
     except Exception as e:
         logger.error(f"Supabase check featured product error: {e}")
         return None
+
+def save_product(name: str, description: str = None, price: float = None, image_url: str = None):
+    try:
+        data_to_insert = {"name": name, "description": description, "price": price, "image_url": image_url}
+        supabase.table("products").insert(data_to_insert).execute()
+    except Exception as e:
+        logger.error(f"Supabase save product error: {e}")
+
+def fetch_products():
+    try:
+        response = supabase.table("products").select("*").order("created_at", desc=True).execute()
+        return response.data
+    except Exception as e:
+        logger.error(f"Supabase fetch products error: {e}")
+        return []
