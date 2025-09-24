@@ -189,6 +189,18 @@ def fetch_product_image(product_name: str) -> str:
 
     return f"https://placehold.co/400x400/4A5568/FFFFFF/png?text={product_name.replace(' ', '+')}"
 
+def _choose_chunk_params(total_chars: int) -> tuple[int, int]:
+    """Pick chunk_size and chunk_overlap dynamically based on document size.
+
+    - Aim for ~120 chunks for large docs; clamp sizes for stability.
+    - chunk_overlap ≈ 15% of chunk_size, capped at 400.
+    """
+    target_chunks = 120
+    chunk_size = max(800, min(3000, (total_chars + target_chunks - 1) // target_chunks))
+    chunk_overlap = min(400, int(chunk_size * 0.15))
+    return chunk_size, chunk_overlap
+
+
 def process_document(content, filetype="pdf"):
     if filetype == "pdf":
         with open("temp.pdf", "wb") as f:
@@ -202,7 +214,10 @@ def process_document(content, filetype="pdf"):
         raise ValueError("Unsupported file type")
     if not docs or all(len(doc.page_content.strip()) == 0 for doc in docs):
         return "⚠️ Document is empty or has no extractable text."
-    splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+    # Dynamically size chunks so bigger files yield larger chunks (fewer, richer chunks)
+    total_chars = sum(len((d.page_content or "").strip()) for d in docs)
+    cs, co = _choose_chunk_params(total_chars)
+    splitter = RecursiveCharacterTextSplitter(chunk_size=cs, chunk_overlap=co)
     chunks = splitter.split_documents(docs)
     full_text = ""
     for chunk in chunks:
@@ -234,7 +249,8 @@ def query_rag(query: str, history: list | None = None):
     """
     try:
         query_vec = embedder.encode([query])[0].tolist()
-        similar_docs = fetch_similar(query_vec, k=3) or []
+        # Fetch a larger set of similar chunks to give the model more context to work with
+        similar_docs = fetch_similar(query_vec, k=8) or []
         if not similar_docs:
             return "⚠️ No relevant documents found in Supabase."
         context = "\n".join([doc.get("content", "") for doc in similar_docs if doc.get("content")])
@@ -254,8 +270,11 @@ def query_rag(query: str, history: list | None = None):
             history_text = "\n".join(lines)
 
         prompt = (
-            "You are a helpful assistant. Use ONLY the provided context to answer.\n"
-            "If the answer is not in the context, say you don't know.\n\n"
+            "You are a helpful assistant. Base your answer strictly on the provided context from the uploaded document(s).\n"
+            "- Combine and summarize facts from multiple context snippets as needed.\n"
+            "- Do NOT invent facts that are not in the context.\n"
+            "- If information is missing, clearly state what's missing and answer only with what the context supports.\n"
+            "- For requests like recommendations or budgets, propose options using ONLY items/prices/specs present in the context; if insufficient, note the gaps and give the best-available partial answer.\n\n"
             f"Context:\n{context}\n\n"
             f"Chat history (most recent last):\n{history_text}\n\n"
             f"User: {query}\n"

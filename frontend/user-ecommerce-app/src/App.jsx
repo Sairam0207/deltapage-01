@@ -19,13 +19,41 @@ function App() {
   useEffect(() => {
     let isMounted = true;
 
+    const normalizeProductKey = (raw = '') => {
+      let s = String(raw || '').toLowerCase().trim();
+      // Drop leading punctuation (e.g., "-Seagate ...")
+      s = s.replace(/^[^a-z0-9]+/, '');
+      // Remove trailing generic category words
+      s = s.replace(/\b(hdd|ssd)\b$/i, '').trim();
+      // Collapse punctuation to spaces and normalize whitespace
+      s = s.replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim();
+      return s;
+    };
+
+    const uniqueByNamePreferRealImage = (items = []) => {
+      const map = new Map();
+      for (const p of items) {
+        const key = normalizeProductKey(p.product_name || p.name || '');
+        if (!key) continue;
+        const existing = map.get(key);
+        const hasRealImage = p.image_url && !String(p.image_url).includes('placehold.co');
+        const existingHasRealImage = existing && existing.image_url && !String(existing.image_url).includes('placehold.co');
+        if (!existing) {
+          map.set(key, p);
+        } else if (hasRealImage && !existingHasRealImage) {
+          map.set(key, p);
+        }
+      }
+      return Array.from(map.values());
+    };
+
     const fetchUploadedOrFeatured = async () => {
       try {
         // 1) Try to show the latest uploaded products first
         console.log("Fetching uploaded products...");
         const uploadedRes = await fetch("http://localhost:8000/uploaded-products");
         const uploadedData = await uploadedRes.json();
-        const uploaded = uploadedData?.products || [];
+        const uploaded = uniqueByNamePreferRealImage(uploadedData?.products || []);
         if (isMounted && Array.isArray(uploaded) && uploaded.length > 0) {
           setProducts(uploaded);
           setIsLoading(false);
@@ -41,7 +69,7 @@ function App() {
         const res = await fetch("http://localhost:8000/featured-products-readonly");
         const data = await res.json();
         if (isMounted) {
-          setProducts(data.products || []);
+          setProducts(uniqueByNamePreferRealImage(data.products || []));
         }
       } catch (err) {
         console.error("Error fetching featured products:", err);
@@ -175,19 +203,19 @@ function App() {
             {[
               {
                 title: 'Graphics Cards',
-                img: 'https://images.unsplash.com/photo-1605648916360-8e4c4d970d9b?q=80&w=1200&auto=format&fit=crop',
+                img: 'https://m.media-amazon.com/images/I/711GaKg9oQL.jpg',
               },
               {
                 title: 'Processors',
-                img: 'https://images.unsplash.com/photo-1593642532973-d31b6557fa68?q=80&w=1200&auto=format&fit=crop',
+                img: 'https://www.servermania.com/kb/images/f_webp,q_auto:best/v1713465219/kb/Featured-1_3453111183/Featured-1_3453111183.png?_i=AA',
               },
               {
                 title: 'Storage & SSDs',
-                img: 'https://images.unsplash.com/photo-1541807084-5c52b6b3adef?q=80&w=1200&auto=format&fit=crop',
+                img: 'https://cdn.mos.cms.futurecdn.net/qToUNqFDhrMuoX7wHdPtgb-970-80.jpg.webp',
               },
               {
                 title: 'Peripherals',
-                img: 'https://images.unsplash.com/photo-1517336714731-489689fd1ca8?q=80&w=1200&auto=format&fit=crop',
+                img: 'https://echipset.com/wp-content/uploads/2023/06/Cover-2023-06-19T140916.570.jpg',
               },
             ].map((c, i) => (
               <div key={i} className="collection-card">
