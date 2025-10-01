@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 from PyPDF2 import PdfReader
 from io import BytesIO
 from typing import List, Dict, Set, Optional
-from utils.rag_utils import fetch_product_image, query_rag, generate_product_description, process_document
+from utils.rag_utils import fetch_product_image, query_rag, generate_product_description, process_document, search_product_page
 import json
 from redis import Redis
 from utils.supabase_utils import init_supabase, fetch_products, fetch_featured_products, save_featured_product, check_featured_product_exists, supabase
@@ -73,16 +73,24 @@ IGNORE_WORDS: Set[str] = {
     "code", "number", "id", "size", "color", "weight", "dimensions", "page",
     "of", "the", "and", "or", "for", "with", "without", "in", "on", "at",
     "invoice", "receipt", "order", "summary", "contact", "phone", "email",
-    "address", "subtotal", "tax", "total", "balance", "due"
+    "address", "subtotal", "tax", "total", "balance", "due",
+    # Common catalog headings (skip as product names)
+    "processors", "processor", "motherboards", "motherboard", "ram", "memory",
+    "storage", "ssd", "hdd", "graphics", "cards", "graphicscards", "gpu", "gpus",
+    "power", "supply", "units", "psu", "cabinets", "cabinet", "case", "cases"
 }
 NON_PRODUCT_PATTERNS: List[re.Pattern] = [
     re.compile(r'^\d{1,2}-\d{1,2}-\d{4}$'),
     re.compile(r'^\d{4}-\d{2}-\d{2}'),
-    re.compile(r'^(date|updated)\s*[:]?\s*.*', re.IGNORECASE),
+    re.compile(r'^(date|updated)\s*[:]?:\s*.*', re.IGNORECASE),
     re.compile(r'^\s*page\s+\d+\s+of\s+\d+\s*$', re.IGNORECASE),
     re.compile(r'^(invoice|receipt|order)\s+number', re.IGNORECASE),
-    re.compile(r'^(subtotal|tax|total|amount)\s*[:]?\s*[\$\₹€]?\s*\d', re.IGNORECASE),
+    re.compile(r'^(subtotal|tax|total|amount)\s*[:]?:\s*[\$\₹€]?\s*\d', re.IGNORECASE),
     re.compile(r'^\s*terms\s+and\s+conditions', re.IGNORECASE),
+    # Section/category headings like "1. Processors"
+    re.compile(r'^\s*\d+\.\s+[A-Za-z][A-Za-z\s()/&+-]*$', re.IGNORECASE),
+    # Standalone category names such as "Processors", "Storage (SSD/HDD)", "PSU"
+    re.compile(r'^\s*(processors?|motherboards?|ram|memory|storage(\s*\(.+\))?|graphics\s*cards?|psu|power\s*supply\s*units?|cabinets?|cases?)\s*$', re.IGNORECASE),
 ]
 all_products_with_images = {}
 product_image_cache = {}
@@ -160,6 +168,8 @@ def clean_product_name(name: str) -> str:
         r'^\d+[\.\)\-\s]*',
         r'[\s\.\-]+$',
         r'\b(qty|quantity|each|unit|price|total)\b.*$',
+        r'^[-•\s]+',
+        r'\s*\([^)]*\)\s*$',
     ]
     cleaned = name
     for pattern in patterns_to_remove:
@@ -480,6 +490,20 @@ async def debug_search(product_name: str):
         return {"product_name": product_name, "image_url": image_url}
     except Exception as e:
         return {"error": str(e)}
+
+@app.get("/product-link")
+async def get_product_link(product_name: str):
+    """Return a best-guess product page URL for the given product name using Firecrawl.
+
+    Query param: product_name
+    Response: { "product_name": str, "product_url": str | None }
+    """
+    try:
+        url = search_product_page(product_name)
+        return {"product_name": product_name, "product_url": url}
+    except Exception as e:
+        logger.error(f"Error in /product-link for '{product_name}': {e}")
+        return {"product_name": product_name, "product_url": None, "error": str(e)}
 
 if __name__ == "__main__":
     import uvicorn

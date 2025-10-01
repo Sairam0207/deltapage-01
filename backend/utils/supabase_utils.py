@@ -29,20 +29,19 @@ def fetch_similar(query_vec: list, k=3):
         logger.error(f"Supabase fetch similar error: {e}")
         return []
 
-def save_product(name: str, description: str = None, price: float = None, image_url: str = None):
+def save_product(name: str, description: str = None, price: float = None, image_url: str = None, product_link: str = None):
+    """Save product details to Supabase, including a link to the product page."""
     try:
-        data_to_insert = {"name": name, "description": description, "price": price, "image_url": image_url}
+        data_to_insert = {
+            "name": name, 
+            "description": description, 
+            "price": price, 
+            "image_url": image_url, 
+            "product_link": product_link  # Added new field
+        }
         supabase.table("products").insert(data_to_insert).execute()
     except Exception as e:
         logger.error(f"Supabase save product error: {e}")
-
-def fetch_products():
-    try:
-        response = supabase.table("products").select("*").order("created_at", desc=True).execute()
-        return response.data
-    except Exception as e:
-        logger.error(f"Supabase fetch products error: {e}")
-        return []
 
 def save_featured_product(name: str, image_url: str, description: str = None):
     """Save a featured product with its image URL and description to Supabase"""
@@ -75,13 +74,7 @@ def check_featured_product_exists(name: str):
         logger.error(f"Supabase check featured product error: {e}")
         return None
 
-def save_product(name: str, description: str = None, price: float = None, image_url: str = None):
-    try:
-        data_to_insert = {"name": name, "description": description, "price": price, "image_url": image_url}
-        supabase.table("products").insert(data_to_insert).execute()
-    except Exception as e:
-        logger.error(f"Supabase save product error: {e}")
-
+# Deduplicated: keep a single definition of save_product and fetch_products
 def fetch_products():
     try:
         response = supabase.table("products").select("*").order("created_at", desc=True).execute()
