@@ -29,8 +29,9 @@ function App() {
       let s = String(raw || '').toLowerCase().trim();
       // Drop leading punctuation (e.g., "-Seagate ...")
       s = s.replace(/^[^a-z0-9]+/, '');
-      // Remove trailing generic category words
+      // Remove common category tokens and memory generation tags
       s = s.replace(/\b(hdd|ssd)\b$/i, '').trim();
+      s = s.replace(/\bddr[45]\b/gi, '').trim();
       // Collapse punctuation to spaces and normalize whitespace
       s = s.replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim();
       return s;
@@ -78,15 +79,9 @@ function App() {
           setProducts(uniqueByNamePreferRealImage(data.products || []));
         }
       } catch (err) {
-
         console.error("Error fetching featured products:", err);
       } finally {
         if (isMounted) setIsLoading(false);
-
-        console.error("Error fetching products:", err);
-      } finally {
-        setIsLoading(false);
-
       }
     };
 
@@ -290,14 +285,6 @@ function App() {
                   <h3>{p.product_name || p.name || 'Product'}</h3>
                   {p.description && <p className="product-description">{p.description}</p>}
                   {p.price && <p className="product-price">₹{p.price}</p>}
-
-              <p>Loading products...</p>
-            ) : products.length > 0 ? (
-              products.map((p, i) => (
-                <div key={i} className="product-item">
-                  <img src={p.image_url} alt={p.product_name} />
-                  <h3>{p.product_name}</h3>
-
                 </div>
               ))
             ) : (
