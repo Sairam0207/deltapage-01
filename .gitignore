@@ -1,2 +1,17 @@
 # Env variables file
 .env
+.env.local
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Runtime artifact: process_document() writes the uploaded PDF to this path
+# before handing it to PyPDFLoader. It is scratch, not a fixture.
+backend/temp.pdf
+
+# Node
+node_modules/
+dist/
